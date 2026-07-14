@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>職人プレイヤー 完全版 (カラーコード準拠)</title>
+    <style>
+        body { background-color: #111; margin: 0; display: flex; flex-direction: column; align-items: center; font-family: "MS UI Gothic", sans-serif; color: #fff; overflow-x: hidden; }
+        .nico-layout { display: flex; gap: 10px; margin-top: 20px; width: 1180px; height: 560px; }
+        
+        /* プレイヤー */
+        #player { position: relative; flex: 1; background: #000; overflow: hidden; border: 1px solid #444; cursor: pointer; }
+        #player.paused::after { content: "PAUSE"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 80px; font-weight: bold; color: rgba(255,255,255,0.2); pointer-events: none; }
+
+        /* コメントリスト */
+        #comment-list-window { width: 360px; background: #222; border: 1px solid #444; display: flex; flex-direction: column; }
+        .list-tabs { display: flex; background: #333; border-bottom: 1px solid #444; }
+        .tab-btn { flex: 1; padding: 10px; font-size: 12px; text-align: center; cursor: pointer; color: #888; border-right: 1px solid #444; }
+        .tab-btn.active { background: #1a1a1a; color: #00bfff; font-weight: bold; }
+        .list-header-row { display: flex; padding: 5px 8px; background: #252525; font-size: 11px; color: #777; border-bottom: 1px solid #333; }
+        #list-content { flex: 1; overflow-y: scroll; font-size: 12px; background: #1a1a1a; }
+        .list-item { display: flex; border-bottom: 1px solid #333; padding: 4px 8px; align-items: center; }
+        .list-item.my-comment { border-left: 3px solid #00bfff; background: rgba(0, 191, 255, 0.1); }
+        .col-time { width: 45px; color: #666; font-family: monospace; }
+        .col-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #ccc; }
+        .col-cmd { width: 80px; color: #ffa500; font-size: 10px; text-align: right; }
+
+        /* 演出系 */
+        .comment-flow { position: absolute; white-space: nowrap; font-weight: bold; text-shadow: 2px 2px 0 #000, -2px -2px 0 #000; z-index: 50; pointer-events: none; }
+        #nuko-race { position: absolute; top: 50px; left: -100px; font-size: 40px; z-index: 40; display: none; }
+
+        /* 投票システム */
+        #vote-panel { position: absolute; bottom: 60px; right: 20px; width: 260px; background: rgba(0, 0, 0, 0.9); border: 2px solid #00bfff; padding: 12px; border-radius: 6px; z-index: 300; display: none; }
+        .vote-title { font-size: 14px; color: #00bfff; font-weight: bold; margin-bottom: 8px; }
+        .vote-row { display: flex; align-items: center; margin-bottom: 6px; font-size: 13px; }
+        .vote-bar-bg { flex: 1; height: 10px; background: #222; margin: 0 10px; border-radius: 5px; overflow: hidden; }
+        .vote-bar-fill { height: 100%; width: 0%; transition: width 0.4s ease; background: #00ff00; }
+
+        /* 特殊ボタン(x1) */
+        #x1-btn { position: absolute; bottom: 60px; left: 20px; padding: 10px 20px; background: #444; border: 1px solid #00bfff; color: #fff; cursor: pointer; display: none; z-index: 300; border-radius: 4px; }
+
+        /* 入力エリア */
+        .input-wrapper { width: 800px; margin-top: 15px; }
+        .input-bar { display: flex; align-items: center; background: #333; border: 1px solid #555; border-radius: 4px; padding: 4px; }
+        #cmd-input { width: 100px; border: none; border-right: 1px solid #555; outline: none; padding: 8px; background: transparent; color: #ffa500; }
+        #text-input { flex: 1; border: none; outline: none; padding: 8px 12px; background: transparent; color: #fff; }
+        .send-btn { width: 35px; height: 35px; cursor: pointer; fill: #00bfff; margin-left: 10px; display: flex; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+
+<div class="nico-layout">
+    <div id="player" onclick="resumeVideo()">
+        <div id="nuko-race">🐈💨 🐈💨 🐈💨</div>
+        <div id="vote-panel"><div id="v-title-ui" class="vote-title"></div><div id="v-container"></div></div>
+        <button id="x1-btn" onclick="addVote(1)">x1 同意する</button>
+        <div id="video-overlay" style="position:absolute; bottom:15px; left:15px; font-family:monospace; z-index:100;">00:00 / 10:00</div>
+        <div id="seekbar-container" style="position:absolute; bottom:0; width:100%; height:8px; background:#333; z-index:110;" onclick="handleSeek(event)"><div id="seekbar-fill" style="height:100%; background:#00bfff; width:0%;"></div></div>
+    </div>
+    
+    <div id="comment-list-window">
+        <div class="list-tabs">
+            <div id="tab-all" class="tab-btn active" onclick="switchTab('all')">すべてのコメント</div>
+            <div id="tab-mine" class="tab-btn" onclick="switchTab('mine')">自分のみ</div>
+        </div>
+        <div class="list-header-row"><div style="width:45px">再生</div><div style="flex:1">コメント</div><div style="width:80px; text-align:right">コマンド</div></div>
+        <div id="list-content"></div>
+    </div>
+</div>
+
+<div class="input-wrapper">
+    <div class="input-bar">
+        <input type="text" id="cmd-input" placeholder="コマンド" spellcheck="false">
+        <input type="text" id="text-input" placeholder="コメントを入力..." spellcheck="false">
+        <div class="send-btn" onclick="launchComment()">
+            <svg viewBox="0 0 24 24" width="24" height="24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </div>
+    </div>
+</div>
+
+<script>
+    const player = document.getElementById('player');
+    const listContent = document.getElementById('list-content');
+    const cmdInput = document.getElementById('cmd-input');
+    const textInput = document.getElementById('text-input');
+    const seekbarFill = document.getElementById('seekbar-fill');
+    const seekbarContainer = document.getElementById('seekbar-container');
+    
+    let currentTime = 0;
+    let isPaused = false;
+    let currentTab = 'all';
+    let comments = JSON.parse(localStorage.getItem('nico_logs')) || [];
+    let voteData = { active: false, title: "", options: [0, 0] };
+
+    updateCommentList();
+    
+    setInterval(() => {
+        if (!isPaused && currentTime < 600) {
+            currentTime++;
+            updateUI();
+            playComments(currentTime);
+        }
+    }, 1000);
+
+    function resumeVideo() {
+        if (isPaused) {
+            isPaused = false;
+            player.classList.remove('paused');
+        }
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (document.activeElement !== textInput && document.activeElement !== cmdInput) {
+            if (e.key === 'Enter' || e.code === 'Space') {
+                e.preventDefault();
+                resumeVideo();
+            }
+        }
+    });
+
+    [textInput, cmdInput].forEach(el => {
+        el.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') launchComment();
+        });
+    });
+
+    function updateUI() {
+        const m = Math.floor(currentTime/60); const s = currentTime%60;
+        document.getElementById('video-overlay').innerText = `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')} / 10:00`;
+        seekbarFill.style.width = (currentTime/600*100)+'%';
+    }
+
+    function launchComment() {
+        const text = textInput.value;
+        const cmd = cmdInput.value;
+        if (!text && !cmd) return;
+
+        if (text === "＠削除") {
+            if(confirm("ログを消去しますか？")) {
+                localStorage.removeItem('nico_logs');
+                comments = [];
+                updateCommentList();
+                textInput.value = ''; return;
+            }
+        }
+
+        const newEntry = { time: currentTime, text, cmd, isMine: true };
+        comments.push(newEntry);
+        localStorage.setItem('nico_logs', JSON.stringify(comments));
+        
+        processCommand(text, cmd);
+        textInput.value = ''; 
+        textInput.focus();
+        updateCommentList();
+    }
+
+    function playComments(time) {
+        comments.forEach(c => { if (c.time === time) processCommand(c.text, c.cmd); });
+    }
+
+    function processCommand(text, cmdStr) {
+        const lowCmd = (cmdStr || "").toLowerCase();
+        
+        if (lowCmd.includes('@ポーズ')) { isPaused = true; player.classList.add('paused'); }
+        if (lowCmd.includes('＠ピザ')) window.open("https://www.pizza-la.co.jp/MenuList.aspx?ListId=Pizza", "_blank");
+        if (lowCmd.includes('＠ゲーム')) {
+            const n = document.getElementById('nuko-race');
+            n.style.display='block';
+            n.animate([{left:'-200px'},{left:'110%'}], 5000).onfinish=()=>n.style.display='none';
+        }
+        if (lowCmd.includes('＠ボタン')) document.getElementById('x1-btn').style.display = 'block';
+        if (lowCmd.includes('＠投票')) initVote(text);
+        if (lowCmd.includes('＠回答') || (voteData.active && /^[1-2]$/.test(text))) addVote(parseInt(text));
+
+        if (!lowCmd.includes('＠')) renderDanmaku(text, lowCmd);
+    }
+
+    function renderDanmaku(text, lowCmd) {
+        if(!text) return;
+        const el = document.createElement('div');
+        el.className = 'comment-flow';
+        el.innerText = text;
+
+        // 指定されたカラーコードを適用
+        const colors = { 
+            white: "#FFFFFF",
+            red: "#FF0000",
+            pink: "#FF8080",
+            orange: "#FFC000",
+            yellow: "#FFFF00",
+            green: "#00FF00",
+            cyan: "#00FFFF",
+            blue: "#0000FF",
+            purple: "#C000FF"
+        };
+        
+        el.style.color = "#FFFFFF"; // デフォルト
+        for (let k in colors) {
+            if (lowCmd.includes(k)) {
+                el.style.color = colors[k];
+                break; // 最初に見つかった色を優先
+            }
+        }
+
+        let fSize = 28;
+        if (lowCmd.includes('small')) fSize = 18;
+        if (lowCmd.includes('medium')) fSize = 28;
+        el.style.fontSize = fSize + 'px';
+
+        if (lowCmd.includes('ue')) {
+            el.style.top = '10%'; el.style.left = '50%'; el.style.transform = 'translateX(-50%)';
+            player.appendChild(el); setTimeout(() => el.remove(), 2000);
+        } else if (lowCmd.includes('shita')) {
+            el.style.bottom = '15%'; el.style.left = '50%'; el.style.transform = 'translateX(-50%)';
+            player.appendChild(el); setTimeout(() => el.remove(), 2000);
+        } else {
+            el.style.top = (Math.random()*80 + 5) + '%';
+            player.appendChild(el);
+            const isReverse = lowCmd.includes('＠逆');
+            el.animate(isReverse ? [{left:'-400px'},{left:'100%'}] : [{left:'100%'},{left:'-800px'}], 4000).onfinish = () => el.remove();
+        }
+    }
+
+    function initVote(title) {
+        voteData = { active: true, title: title || "投票受付中", options: [0, 0] };
+        document.getElementById('v-title-ui').innerText = voteData.title;
+        const container = document.getElementById('v-container');
+        container.innerHTML = `
+            <div class="vote-row">1: はい <div class="vote-bar-bg"><div id="v-bar-1" class="vote-bar-fill"></div></div> <span id="v-cnt-1">0</span></div>
+            <div class="vote-row">2: いいえ <div class="vote-bar-bg"><div id="v-bar-2" class="vote-bar-fill"></div></div> <span id="v-cnt-2">0</span></div>
+        `;
+        document.getElementById('vote-panel').style.display = 'block';
+    }
+
+    function addVote(idx) {
+        if (!voteData.active || (idx !== 1 && idx !== 2)) return;
+        voteData.options[idx-1]++;
+        const total = voteData.options[0] + voteData.options[1];
+        [1,2].forEach(num => {
+            const percent = (voteData.options[num-1] / total * 100);
+            document.getElementById(`v-bar-${num}`).style.width = percent + '%';
+            document.getElementById(`v-cnt-${num}`).innerText = voteData.options[num-1];
+        });
+    }
+
+    function updateCommentList() {
+        listContent.innerHTML = '';
+        const filtered = currentTab === 'mine' ? comments.filter(c => c.isMine) : comments;
+        [...filtered].sort((a,b) => a.time - b.time).forEach(c => {
+            const item = document.createElement('div');
+            item.className = `list-item ${c.isMine ? 'my-comment' : ''}`;
+            item.innerHTML = `<div class="col-time">${Math.floor(c.time/60)}:${(c.time%60).toString().padStart(2,'0')}</div><div class="col-text">${c.text}</div><div class="col-cmd">${c.cmd}</div>`;
+            listContent.appendChild(item);
+        });
+        listContent.scrollTop = listContent.scrollHeight;
+    }
+
+    function switchTab(tab) {
+        currentTab = tab;
+        document.getElementById('tab-all').classList.toggle('active', tab === 'all');
+        document.getElementById('tab-mine').classList.toggle('active', tab === 'mine');
+        updateCommentList();
+    }
+
+    function handleSeek(e) {
+        const r = seekbarContainer.getBoundingClientRect();
+        currentTime = Math.floor(((e.clientX - r.left) / r.width) * 600);
+        updateUI();
+    }
+</script>
+</body>
+</html>
